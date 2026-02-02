@@ -9,6 +9,44 @@ const QUESTION_TIMEOUT = 3000;
 const BASE_MAX_LIVES = 5;
 const TIME_LIMIT_SECONDS = 120; // 2 minutes
 
+// 设备兼容性检查
+const checkDeviceCompatibility = () => {
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const isLowEndDevice = navigator.deviceMemory && navigator.deviceMemory < 4;
+  const isSlowCPU = navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4;
+  const hasTouchSupport = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  const hasAudioSupport = typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined';
+  const hasCanvasSupport = typeof HTMLCanvasElement !== 'undefined';
+  
+  return {
+    isMobile,
+    isLowEndDevice,
+    isSlowCPU,
+    hasTouchSupport,
+    hasAudioSupport,
+    hasCanvasSupport,
+    isCompatible: hasCanvasSupport // 基本兼容性检查
+  };
+};
+
+// 获取设备兼容性配置
+const getDeviceConfig = () => {
+  const deviceInfo = checkDeviceCompatibility();
+  
+  return {
+    deviceInfo,
+    // 根据设备性能调整游戏参数
+    gameParams: {
+      questionTimeout: deviceInfo.isLowEndDevice ? QUESTION_TIMEOUT + 1000 : QUESTION_TIMEOUT,
+      maxLives: deviceInfo.isLowEndDevice ? BASE_MAX_LIVES + 1 : BASE_MAX_LIVES,
+      // 低端设备减少粒子效果数量
+      particleCount: deviceInfo.isLowEndDevice ? 30 : 60,
+      // 低端设备禁用音频以提高性能
+      enableAudio: !deviceInfo.isLowEndDevice && deviceInfo.hasAudioSupport
+    }
+  };
+};
+
 interface FloatingText {
     id: number;
     x: number;
@@ -57,10 +95,14 @@ const POWER_UPS: PowerUp[] = [
 const DEFAULT_HAMMER_SKIN = 'BASIC';
 
 const App: React.FC = () => {
+  // 设备配置
+  const deviceConfig = getDeviceConfig();
+  const [isDeviceCompatible, setIsDeviceCompatible] = useState(true);
+  
   const [gameState, setGameState] = useState<GameState>({
     score: 0,
-    lives: BASE_MAX_LIVES,
-    maxLives: BASE_MAX_LIVES,
+    lives: deviceConfig.gameParams.maxLives,
+    maxLives: deviceConfig.gameParams.maxLives,
     combo: 0,
     maxCombo: 0,
     status: GameStatus.IDLE,
@@ -95,6 +137,17 @@ const App: React.FC = () => {
   const globalTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastConfettiTimeRef = useRef<number>(0);
   const powerUpTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  
+  // 检查设备兼容性
+  useEffect(() => {
+    if (!deviceConfig.deviceInfo.isCompatible) {
+      setIsDeviceCompatible(false);
+      console.warn('Device not compatible:', deviceConfig.deviceInfo);
+    } else {
+      console.log('Device info:', deviceConfig.deviceInfo);
+      console.log('Game params:', deviceConfig.gameParams);
+    }
+  }, []);
   
   // 检查道具是否激活
   const isPowerUpActive = useCallback((type: PowerUpType): boolean => {
@@ -178,7 +231,7 @@ const App: React.FC = () => {
     return true;
   }, [gameState.score]);
 
-  const addFloatingText = (x: number, y: number, content: string, color: string) => {
+  const addFloatingText = useCallback((x: number, y: number, content: string, color: string) => {
     const id = nextFloatId.current++;
     // 如果是得分显示，固定位置到分数统计区域旁边
     let displayX = x;
@@ -192,7 +245,7 @@ const App: React.FC = () => {
     setTimeout(() => {
       setFloatingTexts(prev => prev.filter(t => t.id !== id));
     }, 800);
-  };
+  }, []);
 
   const getPerformanceInfo = (score: number): GameResult => {
     if (score === 0) return { grade: "和平主义者", comment: "只要我不动，数学就伤害不了我。Respect！" };
@@ -230,22 +283,26 @@ const App: React.FC = () => {
     });
   }, []);
 
-  const triggerCelebration = () => {
+  const triggerCelebration = useCallback(() => {
     const now = Date.now();
     if (now - lastConfettiTimeRef.current < 600) return;
     lastConfettiTimeRef.current = now;
 
     if (!(window as any).confetti) return;
-    (window as any).confetti({
-      particleCount: 60,
-      spread: 60,            
-      origin: { y: 0.7 },
-      colors: ['#ff0000', '#ffa500', '#ffff00', '#00ff00', '#0000ff', '#4b0082', '#ee82ee'],
-      gravity: 1.6,
-      scalar: 0.8,
-      ticks: 100
-    });
-  };
+    try {
+      (window as any).confetti({
+        particleCount: deviceConfig.gameParams.particleCount,
+        spread: 60,            
+        origin: { y: 0.7 },
+        colors: ['#ff0000', '#ffa500', '#ffff00', '#00ff00', '#0000ff', '#4b0082', '#ee82ee'],
+        gravity: 1.6,
+        scalar: 0.8,
+        ticks: 100
+      });
+    } catch (error) {
+      console.warn('Failed to trigger celebration:', error);
+    }
+  }, [deviceConfig.gameParams.particleCount]);
 
   const startNewLevel = useCallback((mode: GameMode, difficulty: Difficulty, currentCorrectCount: number) => {
     if (questionTimerRef.current) clearInterval(questionTimerRef.current);
@@ -301,31 +358,35 @@ const App: React.FC = () => {
     setMoles(newMoles);
   }, [isPowerUpActive]);
 
-  const handleError = (reason: EndReason, q: Question | null) => {
-    playErrorSound();
-    setIsShaking(true);
-    setTimeout(() => setIsShaking(false), 300);
+  const handleError = useCallback((reason: EndReason, q: Question | null) => {
+    try {
+      playErrorSound();
+      setIsShaking(true);
+      setTimeout(() => setIsShaking(false), 300);
 
-    setGameState(prev => {
-      const resetCombo = 0;
-      if (prev.mistakeShields > 0) {
-        return { ...prev, mistakeShields: prev.mistakeShields - 1, combo: resetCombo };
-      }
-      const nextLives = prev.lives - 1;
-      if (nextLives <= 0) {
-        setTimeout(() => endGame(reason, q), 10);
-        return { ...prev, lives: 0, combo: resetCombo };
-      }
-      return { ...prev, lives: nextLives, combo: resetCombo };
-    });
-
-    setGameState(prev => {
-        if (prev.lives > 0 || prev.mistakeShields > 0) {
-            startNewLevel(prev.selectedMode, prev.selectedDifficulty, prev.correctCount);
+      setGameState(prev => {
+        const resetCombo = 0;
+        if (prev.mistakeShields > 0) {
+          return { ...prev, mistakeShields: prev.mistakeShields - 1, combo: resetCombo };
         }
-        return prev;
-    });
-  };
+        const nextLives = prev.lives - 1;
+        if (nextLives <= 0) {
+          setTimeout(() => endGame(reason, q), 10);
+          return { ...prev, lives: 0, combo: resetCombo };
+        }
+        return { ...prev, lives: nextLives, combo: resetCombo };
+      });
+
+      setGameState(prev => {
+          if (prev.lives > 0 || prev.mistakeShields > 0) {
+              startNewLevel(prev.selectedMode, prev.selectedDifficulty, prev.correctCount);
+          }
+          return prev;
+      });
+    } catch (error) {
+      console.warn('Error in handleError:', error);
+    }
+  }, [endGame, startNewLevel]);
 
   const startGame = (mode: GameMode) => {
     setShowSummary(false);
@@ -420,63 +481,67 @@ const App: React.FC = () => {
 
 
 
-  const handleMoleClick = (id: number, e: React.MouseEvent) => {
-    if (gameState.status !== GameStatus.PLAYING) return;
-    const mole = moles[id];
-    if (!mole.isActive) return;
+  const handleMoleClick = useCallback((id: number, e: React.MouseEvent) => {
+    try {
+      if (gameState.status !== GameStatus.PLAYING) return;
+      const mole = moles[id];
+      if (!mole || !mole.isActive) return;
 
-    if (mole.type === MoleType.BOMB) {
-      playExplosionSound();
-      handleError('EXPLOSION', question);
-      return;
-    }
-
-    if (mole.isCorrect) {
-      // 检查平底锅道具是否激活，戴头盔的地鼠只需要一次击打
-      const isPanActive = isPowerUpActive(PowerUpType.PAN);
-      if (mole.type === MoleType.HARDENED && mole.hitsRequired > 1 && !isPanActive) {
-        playClangSound();
-        const updatedMoles = [...moles];
-        updatedMoles[id] = { ...mole, hitsRequired: mole.hitsRequired - 1 };
-        setMoles(updatedMoles);
-        addFloatingText(e.clientX, e.clientY, "DUP!", "#6b7280");
+      if (mole.type === MoleType.BOMB) {
+        playExplosionSound();
+        handleError('EXPLOSION', question);
         return;
       }
-      
-      triggerCelebration();
-      playWhackSound();
 
-      const nextCombo = gameState.combo + 1;
-      let basePoints = 5;
-      if (nextCombo > 20) basePoints = 20;
-      else if (nextCombo > 10) basePoints = 15;
-      else if (nextCombo > 5) basePoints = 10;
+      if (mole.isCorrect) {
+        // 检查平底锅道具是否激活，戴头盔的地鼠只需要一次击打
+        const isPanActive = isPowerUpActive(PowerUpType.PAN);
+        if (mole.type === MoleType.HARDENED && mole.hitsRequired > 1 && !isPanActive) {
+          playClangSound();
+          const updatedMoles = [...moles];
+          updatedMoles[id] = { ...mole, hitsRequired: mole.hitsRequired - 1 };
+          setMoles(updatedMoles);
+          addFloatingText(e.clientX, e.clientY, "DUP!", "#6b7280");
+          return;
+        }
+        
+        triggerCelebration();
+        playWhackSound();
 
-      const scoreAdd = basePoints;
+        const nextCombo = gameState.combo + 1;
+        let basePoints = 5;
+        if (nextCombo > 20) basePoints = 20;
+        else if (nextCombo > 10) basePoints = 15;
+        else if (nextCombo > 5) basePoints = 10;
 
-      let floatColor = "#22c55e"; 
-      if (nextCombo > 20) floatColor = "#ef4444"; 
-      else if (nextCombo > 10) floatColor = "#f97316"; 
-      
-      addFloatingText(e.clientX, e.clientY, `+${scoreAdd}`, floatColor);
+        const scoreAdd = basePoints;
 
-      const nextCorrectCount = gameState.correctCount + 1;
-      setGameState(prev => {
-          const newMaxCombo = Math.max(prev.maxCombo, nextCombo);
-          return { 
-            ...prev, 
-            score: prev.score + scoreAdd, 
-            combo: nextCombo, 
-            maxCombo: newMaxCombo,
-            correctCount: nextCorrectCount 
-          };
-      });
-      
-      startNewLevel(gameState.selectedMode, gameState.selectedDifficulty, nextCorrectCount);
-    } else {
-      handleError('WRONG', question);
+        let floatColor = "#22c55e"; 
+        if (nextCombo > 20) floatColor = "#ef4444"; 
+        else if (nextCombo > 10) floatColor = "#f97316"; 
+        
+        addFloatingText(e.clientX, e.clientY, `+${scoreAdd}`, floatColor);
+
+        const nextCorrectCount = gameState.correctCount + 1;
+        setGameState(prev => {
+            const newMaxCombo = Math.max(prev.maxCombo, nextCombo);
+            return { 
+              ...prev, 
+              score: prev.score + scoreAdd, 
+              combo: nextCombo, 
+              maxCombo: newMaxCombo,
+              correctCount: nextCorrectCount 
+            };
+        });
+        
+        startNewLevel(gameState.selectedMode, gameState.selectedDifficulty, nextCorrectCount);
+      } else {
+        handleError('WRONG', question);
+      }
+    } catch (error) {
+      console.warn('Error in handleMoleClick:', error);
     }
-  };
+  }, [gameState, moles, isPowerUpActive, addFloatingText, triggerCelebration, handleError, startNewLevel, question]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -486,6 +551,31 @@ const App: React.FC = () => {
 
   return (
     <div className={`min-h-screen flex flex-col items-center justify-start p-3 pb-12 bg-gradient-to-b from-blue-300 via-green-400 to-green-600 transition-colors duration-500 ${isShaking ? 'shake bg-red-900' : ''} ${gameState.combo >= 15 ? 'fever-border' : ''}`}>
+
+      {/* 设备兼容性错误提示 */}
+      {!isDeviceCompatible && (
+        <div className="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center p-4 backdrop-blur-md">
+          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl text-center border-4 border-orange-500">
+            <h2 className="text-2xl text-orange-600 font-black mb-4">⚠️ 设备兼容性问题</h2>
+            <p className="text-gray-600 mb-6">您的设备可能无法完全支持本游戏的所有功能。</p>
+            <div className="bg-blue-50 p-4 rounded-2xl mb-6 text-left">
+              <h3 className="font-black text-blue-700 mb-2">最低设备要求：</h3>
+              <ul className="space-y-2 text-sm text-gray-600">
+                <li>• 至少 4GB 内存</li>
+                <li>• 支持 HTML5 Canvas</li>
+                <li>• 现代浏览器（Chrome、Safari、Firefox）</li>
+              </ul>
+            </div>
+            <button 
+              onClick={() => setIsDeviceCompatible(true)}
+              className="w-full bg-green-500 text-white py-4 rounded-3xl text-xl font-black shadow-xl border-b-4 border-green-700 hover:bg-green-400 transition-all"
+            >
+              尝试继续游戏
+            </button>
+          </div>
+        </div>
+      )}
+      
       <HammerCursor />
       
       {floatingTexts.map(t => (
@@ -601,7 +691,26 @@ const App: React.FC = () => {
       {/* IDLE UI (主菜单) */}
       {gameState.status === GameStatus.IDLE && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-md">
-          <div className="bg-white rounded-[40px] p-8 max-w-md w-full shadow-2xl text-center border-8 border-yellow-400 flex flex-col items-center animate-in zoom-in">
+          <div className="bg-white rounded-[40px] p-8 max-w-md w-full shadow-2xl text-center border-8 border-yellow-400 flex flex-col items-center animate-in zoom-in relative">
+            {/* 左上角品牌标识 - 设计方案 1：现代简洁风格 */}
+            {/* 取消注释以使用此方案 */}
+            {/* <div className="absolute top-4 left-4 text-left">
+              <div className="text-gray-800 font-black text-lg sm:text-xl leading-tight drop-shadow-sm">向上书院</div>
+              <div className="text-gray-600 font-semibold text-xs sm:text-sm mt-1 tracking-wide">Up Academy</div>
+            </div> */}
+
+            {/* 左上角品牌标识 - 设计方案 2：优雅质感风格 */}
+            <div className="absolute top-4 left-4 text-left bg-gray-100 bg-opacity-70 rounded-lg p-2">
+              <div className="text-gray-700 font-black text-lg sm:text-xl leading-tight">向上书院</div>
+              <div className="text-gray-500 font-medium text-xs sm:text-sm mt-1 tracking-wider italic">Up Academy</div>
+            </div>
+
+            {/* 左上角品牌标识 - 设计方案 3：游戏化活力风格 */}
+            {/* 取消注释以使用此方案 */}
+            {/* <div className="absolute top-4 left-4 text-left">
+              <div className="text-gray-800 font-black text-lg sm:text-xl leading-tight drop-shadow-sm">向上书院</div>
+              <div className="text-gray-600 font-bold text-xs sm:text-sm mt-1 tracking-widest uppercase">Up Academy</div>
+            </div> */}
             <h1 className="text-4xl text-blue-600 mb-2 font-black">疯狂算鼠锤 🐹</h1>
             <p className="text-gray-400 mb-6 text-sm font-bold tracking-widest">挑战你的计算极限</p>
             
@@ -636,10 +745,11 @@ const App: React.FC = () => {
                 ))}
             </div>
 
-            <div className="w-full flex flex-col gap-3">
-              <button onClick={() => { setPendingGameMode(GameMode.ADD_SUB); setShowRules(true); }} className="bg-sky-500 text-white py-4 rounded-3xl text-2xl font-black shadow-xl border-b-6 border-sky-700 active:border-b-0 hover:bg-sky-400 transition-all">加减法 ➕</button>
-              <button onClick={() => { setPendingGameMode(GameMode.MUL_DIV); setShowRules(true); }} className="bg-indigo-500 text-white py-4 rounded-3xl text-2xl font-black shadow-xl border-b-6 border-indigo-700 active:border-b-0 hover:bg-indigo-400 transition-all">乘除法 ✖️</button>
-              <button onClick={() => { setPendingGameMode(GameMode.MIXED); setShowRules(true); }} className="bg-rose-500 text-white py-4 rounded-3xl text-2xl font-black shadow-xl border-b-6 border-rose-700 active:border-b-0 hover:bg-rose-400 transition-all">混合大作战 ♾️</button>
+            <div className="w-full flex flex-col gap-4">
+              <button onClick={() => { setShowRules(true); }} className="bg-yellow-500 text-white py-2 rounded-3xl text-lg font-black shadow-xl border-b-4 border-yellow-700 active:border-b-0 hover:bg-yellow-400 transition-all w-3/4 mx-auto">📋 游戏规则</button>
+              <button onClick={() => startGame(GameMode.ADD_SUB)} className="bg-sky-500 text-white py-4 rounded-3xl text-2xl font-black shadow-xl border-b-6 border-sky-700 active:border-b-0 hover:bg-sky-400 transition-all">加减法 ➕</button>
+              <button onClick={() => startGame(GameMode.MUL_DIV)} className="bg-indigo-500 text-white py-4 rounded-3xl text-2xl font-black shadow-xl border-b-6 border-indigo-700 active:border-b-0 hover:bg-indigo-400 transition-all">乘除法 ✖️</button>
+              <button onClick={() => startGame(GameMode.MIXED)} className="bg-rose-500 text-white py-4 rounded-3xl text-2xl font-black shadow-xl border-b-6 border-rose-700 active:border-b-0 hover:bg-rose-400 transition-all">混合大作战 ♾️</button>
             </div>
           </div>
         </div>
@@ -648,8 +758,8 @@ const App: React.FC = () => {
       {/* GAMEOVER UI */}
       {gameState.status === GameStatus.GAMEOVER && !showSummary && !gameState.isWatchingAd && (
         <div className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl p-8 max-sm w-full shadow-2xl text-center border-4 border-orange-500 animate-in zoom-in duration-300">
-            <h3 className="text-xl text-orange-600 font-black mb-1">本次得分</h3>
+          <div className="bg-white rounded-3xl p-8 max-sm w-full shadow-2xl text-center border-4 border-orange-500 animate-in zoom-in duration-300 relative">
+<h3 className="text-xl text-orange-600 font-black mb-1">本次得分</h3>
             <div className="text-8xl text-orange-500 font-black mb-8 drop-shadow-md">{gameState.score}</div>
             
             <div className="flex flex-col gap-3">
@@ -669,8 +779,8 @@ const App: React.FC = () => {
       {/* SUMMARY UI (战报汇总) */}
       {showSummary && (
         <div className="fixed inset-0 z-[200] bg-black/85 flex items-center justify-center p-4 backdrop-blur-md">
-            <div className="bg-white rounded-[50px] p-8 max-w-sm w-full shadow-2xl text-center border-8 border-orange-400 flex flex-col items-center animate-in zoom-in">
-                <h2 className="text-4xl text-orange-600 font-black mb-4">🏆 荣耀战报 🏆</h2>
+            <div className="bg-white rounded-[50px] p-8 max-w-sm w-full shadow-2xl text-center border-8 border-orange-400 flex flex-col items-center animate-in zoom-in relative">
+<h2 className="text-4xl text-orange-600 font-black mb-4">🏆 荣耀战报 🏆</h2>
                 <div className="mb-6 px-6 py-2 bg-gradient-to-r from-orange-100 to-yellow-100 border-4 border-orange-400 rounded-2xl shadow-md transform -rotate-1">
                     <span className="text-xs text-orange-400 block font-black uppercase tracking-tighter">获得称号</span>
                     <span className="text-2xl text-orange-600 font-black">{gameState.result?.grade || '算术新人'}</span>
@@ -707,8 +817,8 @@ const App: React.FC = () => {
       {/* 游戏规则介绍页面 */}
       {showRules && (
           <div className="fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-4 backdrop-blur-md">
-              <div className="bg-white rounded-[40px] p-8 max-w-2xl w-full shadow-2xl text-center border-8 border-yellow-400 overflow-y-auto max-h-[90vh]">
-                  <h1 className="text-4xl text-blue-600 mb-4 font-black">🎮 游戏规则介绍</h1>
+              <div className="bg-white rounded-[40px] p-8 max-w-2xl w-full shadow-2xl text-center border-8 border-yellow-400 overflow-y-auto max-h-[90vh] relative">
+<h1 className="text-4xl text-blue-600 mb-4 font-black">🎮 游戏规则介绍</h1>
                   
                   {/* 本关游戏基本规则说明 */}
                   <div className="mb-6 text-left bg-blue-50 rounded-2xl p-6 border-2 border-blue-200">
@@ -837,19 +947,47 @@ const App: React.FC = () => {
                       </div>
                   </div>
                   
-                  {/* 确认按钮 */}
-                  <div className="mt-8">
+                  {/* 游戏模式选择 */}
+                  <div className="mt-6">
+                      <h2 className="text-xl text-blue-700 font-black mb-3">选择游戏模式开始</h2>
+                      <div className="grid grid-cols-1 gap-3">
+                          <button 
+                              onClick={() => {
+                                  setShowRules(false);
+                                  startGame(GameMode.ADD_SUB);
+                              }}
+                              className="bg-sky-500 text-white py-4 rounded-3xl text-xl font-black shadow-xl border-b-4 border-sky-700 hover:bg-sky-400 active:border-b-0 transition-all"
+                          >
+                              ➕ 加减法
+                          </button>
+                          <button 
+                              onClick={() => {
+                                  setShowRules(false);
+                                  startGame(GameMode.MUL_DIV);
+                              }}
+                              className="bg-indigo-500 text-white py-4 rounded-3xl text-xl font-black shadow-xl border-b-4 border-indigo-700 hover:bg-indigo-400 active:border-b-0 transition-all"
+                          >
+                              ✖️ 乘除法
+                          </button>
+                          <button 
+                              onClick={() => {
+                                  setShowRules(false);
+                                  startGame(GameMode.MIXED);
+                              }}
+                              className="bg-rose-500 text-white py-4 rounded-3xl text-xl font-black shadow-xl border-b-4 border-rose-700 hover:bg-rose-400 active:border-b-0 transition-all"
+                          >
+                              ♾️ 混合大作战
+                          </button>
+                      </div>
+                  </div>
+                  
+                  {/* 关闭按钮 */}
+                  <div className="mt-4">
                       <button 
-                          onClick={() => {
-                              setShowRules(false);
-                              if (pendingGameMode) {
-                                  startGame(pendingGameMode);
-                                  setPendingGameMode(null);
-                              }
-                          }}
-                          className="w-full bg-rose-500 text-white py-5 rounded-3xl text-2xl font-black shadow-xl border-b-6 border-rose-700 hover:bg-rose-400 active:border-b-0 transition-all"
+                          onClick={() => setShowRules(false)}
+                          className="w-full bg-gray-500 text-white py-3 rounded-3xl text-lg font-black shadow-xl border-b-4 border-gray-700 hover:bg-gray-400 active:border-b-0 transition-all"
                       >
-                          🚀 确认规则，开始游戏！
+                          ❌ 关闭
                       </button>
                   </div>
               </div>
@@ -858,8 +996,8 @@ const App: React.FC = () => {
       
       {/* WATCHING AD UI */}
       {gameState.isWatchingAd && (
-          <div className="fixed inset-0 z-[200] bg-black flex flex-col items-center justify-center p-8 text-white">
-              <div className="text-center">
+          <div className="fixed inset-0 z-[200] bg-black flex flex-col items-center justify-center p-8 text-white relative">
+<div className="text-center">
                   <h2 className="text-3xl font-black mb-8 tracking-widest">精彩广告中...</h2>
                   <div className="w-72 h-6 bg-gray-800 rounded-full overflow-hidden mb-8 border-4 border-white/10 p-1">
                       <div className="h-full bg-yellow-400 rounded-full transition-all duration-1000 ease-linear" style={{ width: `${(3 - adCountdown) / 3 * 100}%` }}></div>

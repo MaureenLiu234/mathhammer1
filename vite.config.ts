@@ -18,6 +18,18 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
+      },
+      build: {
+        target: ['es2020', 'chrome58', 'firefox57', 'safari11', 'edge88'],
+        cssTarget: ['es2020', 'chrome58', 'firefox57', 'safari11', 'edge88'],
+        minify: 'terser',
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              react: ['react', 'react-dom'],
+            }
+          }
+        }
       }
     };
 });
