@@ -691,26 +691,11 @@ const App: React.FC = () => {
       {/* IDLE UI (主菜单) */}
       {gameState.status === GameStatus.IDLE && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-md">
-          <div className="bg-white rounded-[40px] p-8 max-w-md w-full shadow-2xl text-center border-8 border-yellow-400 flex flex-col items-center animate-in zoom-in relative">
-            {/* 左上角品牌标识 - 设计方案 1：现代简洁风格 */}
-            {/* 取消注释以使用此方案 */}
-            {/* <div className="absolute top-4 left-4 text-left">
-              <div className="text-gray-800 font-black text-lg sm:text-xl leading-tight drop-shadow-sm">向上书院</div>
-              <div className="text-gray-600 font-semibold text-xs sm:text-sm mt-1 tracking-wide">Up Academy</div>
-            </div> */}
-
-            {/* 左上角品牌标识 - 设计方案 2：优雅质感风格 */}
-            <div className="absolute top-4 left-4 text-left bg-gray-100 bg-opacity-70 rounded-lg p-2">
-              <div className="text-gray-700 font-black text-lg sm:text-xl leading-tight">向上书院</div>
-              <div className="text-gray-500 font-medium text-xs sm:text-sm mt-1 tracking-wider italic">Up Academy</div>
+          <div className="bg-white rounded-[40px] p-8 max-w-md w-full shadow-2xl text-center border-8 border-yellow-400 flex flex-col items-center animate-in zoom-in">
+            {/* 品牌标识 - 中英文一行展示 */}
+            <div className="text-center mb-2">
+              <div className="text-gray-700 font-bold text-sm sm:text-base">向上书院 Up Academy</div>
             </div>
-
-            {/* 左上角品牌标识 - 设计方案 3：游戏化活力风格 */}
-            {/* 取消注释以使用此方案 */}
-            {/* <div className="absolute top-4 left-4 text-left">
-              <div className="text-gray-800 font-black text-lg sm:text-xl leading-tight drop-shadow-sm">向上书院</div>
-              <div className="text-gray-600 font-bold text-xs sm:text-sm mt-1 tracking-widest uppercase">Up Academy</div>
-            </div> */}
             <h1 className="text-4xl text-blue-600 mb-2 font-black">疯狂算鼠锤 🐹</h1>
             <p className="text-gray-400 mb-6 text-sm font-bold tracking-widest">挑战你的计算极限</p>
             
